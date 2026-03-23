@@ -1,0 +1,9 @@
+# IDE
+.idea/
+
+# Compiled
+*.exe
+*.exe~
+
+# Secrets
+pwd.txt
