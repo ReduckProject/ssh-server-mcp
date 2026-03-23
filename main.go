@@ -104,6 +104,19 @@ func (m *SSHServerManager) Execute(name string, command string) (*sshclient.Comm
 	return client.ExecuteCommand(command)
 }
 
+// ExecuteWithContext 带上下文的命令执行（支持超时控制）
+func (m *SSHServerManager) ExecuteWithContext(ctx context.Context, name string, command string) (*sshclient.CommandResult, error) {
+	m.mu.RLock()
+	client, exists := m.servers[name]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("server %s not found", name)
+	}
+
+	return client.ExecuteCommandWithContext(ctx, command)
+}
+
 // List 列出所有已注册的服务器
 func (m *SSHServerManager) List() []SSHServerConfig {
 	m.mu.RLock()
@@ -314,10 +327,10 @@ func registerTools(s *server.MCPServer) {
 
 	// 执行命令工具
 	execTool := mcp.NewTool("ssh_execute",
-		mcp.WithDescription("在指定的SSH服务器上执行命令"),
+		mcp.WithDescription("在指定的SSH服务器上执行命令。默认超时30秒，对于长时间运行的命令(如tail -f)建议使用 timeout 参数调整或使用 tail -n 100 代替。"),
 		mcp.WithString("server", mcp.Required(), mcp.Description("服务器名称")),
 		mcp.WithString("command", mcp.Required(), mcp.Description("要执行的命令")),
-		mcp.WithNumber("timeout", mcp.Description("超时时间（秒），默认30秒")),
+		mcp.WithNumber("timeout", mcp.Description("超时时间（秒），默认30秒，最大300秒")),
 	)
 
 	s.AddTool(execTool, handleExecuteCommand)
@@ -399,13 +412,22 @@ func handleExecuteCommand(ctx context.Context, request mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError("缺少必需参数: server, command"), nil
 	}
 
-	timeout := time.Duration(request.GetInt("timeout", 30)) * time.Second
+	timeout := request.GetInt("timeout", 30)
+	if timeout < 1 {
+		timeout = 30
+	}
+	if timeout > 300 {
+		timeout = 300
+	}
 
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	result, err := manager.Execute(server, command)
+	result, err := manager.ExecuteWithContext(ctx, server, command)
 	if err != nil {
+		if err == context.DeadlineExceeded {
+			return mcp.NewToolResultError(fmt.Sprintf("命令执行超时 (%d秒)，请尝试增加 timeout 参数或优化命令", timeout)), nil
+		}
 		return mcp.NewToolResultError(fmt.Sprintf("执行命令失败: %v", err)), nil
 	}
 
