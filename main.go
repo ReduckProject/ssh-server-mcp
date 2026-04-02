@@ -364,6 +364,26 @@ func registerTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(downloadTool, handleDownloadFile)
+
+	// 上传文件夹工具
+	uploadDirTool := mcp.NewTool("ssh_upload_dir",
+		mcp.WithDescription("递归上传本地文件夹到远程SSH服务器。"),
+		mcp.WithString("server", mcp.Required(), mcp.Description("服务器名称")),
+		mcp.WithString("localPath", mcp.Required(), mcp.Description("本地文件夹路径")),
+		mcp.WithString("remotePath", mcp.Required(), mcp.Description("远程服务器上的目标文件夹路径")),
+	)
+
+	s.AddTool(uploadDirTool, handleUploadDir)
+
+	// 下载文件夹工具
+	downloadDirTool := mcp.NewTool("ssh_download_dir",
+		mcp.WithDescription("递归下载远程SSH服务器上的文件夹到本地。"),
+		mcp.WithString("server", mcp.Required(), mcp.Description("服务器名称")),
+		mcp.WithString("remotePath", mcp.Required(), mcp.Description("远程服务器上的源文件夹路径")),
+		mcp.WithString("localPath", mcp.Required(), mcp.Description("本地保存文件夹路径")),
+	)
+
+	s.AddTool(downloadDirTool, handleDownloadDir)
 }
 
 func handleRegisterServer(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -484,6 +504,64 @@ func handleTestConnection(ctx context.Context, request mcp.CallToolRequest) (*mc
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("服务器 %s 连接正常", name)), nil
+}
+
+func handleUploadDir(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	serverName := request.GetString("server", "")
+	localPath := request.GetString("localPath", "")
+	remotePath := request.GetString("remotePath", "")
+
+	if serverName == "" || localPath == "" || remotePath == "" {
+		return mcp.NewToolResultError("缺少必需参数: server, localPath, remotePath"), nil
+	}
+
+	manager.mu.RLock()
+	client, exists := manager.servers[serverName]
+	manager.mu.RUnlock()
+
+	if !exists {
+		return mcp.NewToolResultError(fmt.Sprintf("服务器 %s 未找到", serverName)), nil
+	}
+
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("本地路径不存在: %v", err)), nil
+	}
+	if !info.IsDir() {
+		return mcp.NewToolResultError("localPath 不是文件夹，请使用 ssh_upload_file 上传单个文件"), nil
+	}
+
+	fileCount, dirCount, err := client.UploadDir(localPath, remotePath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("上传文件夹失败: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("文件夹上传成功到 %s:%s (上传了 %d 个文件, %d 个目录)", serverName, remotePath, fileCount, dirCount)), nil
+}
+
+func handleDownloadDir(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	serverName := request.GetString("server", "")
+	remotePath := request.GetString("remotePath", "")
+	localPath := request.GetString("localPath", "")
+
+	if serverName == "" || remotePath == "" || localPath == "" {
+		return mcp.NewToolResultError("缺少必需参数: server, remotePath, localPath"), nil
+	}
+
+	manager.mu.RLock()
+	client, exists := manager.servers[serverName]
+	manager.mu.RUnlock()
+
+	if !exists {
+		return mcp.NewToolResultError(fmt.Sprintf("服务器 %s 未找到", serverName)), nil
+	}
+
+	fileCount, dirCount, err := client.DownloadDir(remotePath, localPath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("下载文件夹失败: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("文件夹下载成功从 %s:%s 到 %s (下载了 %d 个文件, %d 个目录)", serverName, remotePath, localPath, fileCount, dirCount)), nil
 }
 
 func handleUploadFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

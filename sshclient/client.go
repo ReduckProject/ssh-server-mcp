@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -323,4 +324,117 @@ func (c *SSHClient) DownloadFile(remotePath, localPath string) error {
 	}
 
 	return nil
+}
+
+// UploadDir 递归上传本地目录到远程服务器
+func (c *SSHClient) UploadDir(localDir, remoteDir string) (int, int, error) {
+	sftpClient, err := c.newSFTPClient()
+	if err != nil {
+		return 0, 0, fmt.Errorf("创建SFTP客户端失败: %w", err)
+	}
+	defer sftpClient.Close()
+
+	var fileCount, dirCount int
+
+	err = filepath.Walk(localDir, func(localPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// 计算相对路径
+		relPath, err := filepath.Rel(localDir, localPath)
+		if err != nil {
+			return err
+		}
+		relPath = filepath.ToSlash(relPath)
+		remotePath := path.Join(remoteDir, relPath)
+
+		if info.IsDir() {
+			if err := sftpClient.MkdirAll(remotePath); err != nil {
+				return fmt.Errorf("创建远程目录 %s 失败: %w", remotePath, err)
+			}
+			dirCount++
+			return nil
+		}
+
+		// 上传文件
+		data, err := os.ReadFile(localPath)
+		if err != nil {
+			return fmt.Errorf("读取本地文件 %s 失败: %w", localPath, err)
+		}
+
+		// 确保父目录存在
+		sftpClient.MkdirAll(path.Dir(remotePath))
+
+		dstFile, err := sftpClient.Create(remotePath)
+		if err != nil {
+			return fmt.Errorf("创建远程文件 %s 失败: %w", remotePath, err)
+		}
+		defer dstFile.Close()
+
+		if _, err := dstFile.Write(data); err != nil {
+			return fmt.Errorf("写入远程文件 %s 失败: %w", remotePath, err)
+		}
+		fileCount++
+		return nil
+	})
+
+	return fileCount, dirCount, err
+}
+
+// DownloadDir 递归下载远程目录到本地
+func (c *SSHClient) DownloadDir(remoteDir, localDir string) (int, int, error) {
+	sftpClient, err := c.newSFTPClient()
+	if err != nil {
+		return 0, 0, fmt.Errorf("创建SFTP客户端失败: %w", err)
+	}
+	defer sftpClient.Close()
+
+	var fileCount, dirCount int
+
+	walker := sftpClient.Walk(remoteDir)
+	for walker.Step() {
+		if err := walker.Err(); err != nil {
+			return fileCount, dirCount, err
+		}
+
+		remotePath := walker.Path()
+		relPath, err := filepath.Rel(remoteDir, remotePath)
+		if err != nil {
+			continue
+		}
+		relPath = filepath.ToSlash(relPath)
+		localPath := filepath.Join(localDir, relPath)
+
+		if walker.Stat().IsDir() {
+			if err := os.MkdirAll(localPath, 0755); err != nil {
+				return fileCount, dirCount, fmt.Errorf("创建本地目录 %s 失败: %w", localPath, err)
+			}
+			dirCount++
+			continue
+		}
+
+		// 下载文件
+		srcFile, err := sftpClient.Open(remotePath)
+		if err != nil {
+			return fileCount, dirCount, fmt.Errorf("打开远程文件 %s 失败: %w", remotePath, err)
+		}
+
+		os.MkdirAll(filepath.Dir(localPath), 0755)
+		dstFile, err := os.Create(localPath)
+		if err != nil {
+			srcFile.Close()
+			return fileCount, dirCount, fmt.Errorf("创建本地文件 %s 失败: %w", localPath, err)
+		}
+
+		_, err = io.Copy(dstFile, srcFile)
+		srcFile.Close()
+		dstFile.Close()
+		if err != nil {
+			return fileCount, dirCount, fmt.Errorf("下载文件 %s 失败: %w", remotePath, err)
+		}
+		fileCount++
+	}
+
+	return fileCount, dirCount, nil
 }
