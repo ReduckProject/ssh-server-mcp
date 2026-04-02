@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"flag"
@@ -342,6 +343,27 @@ func registerTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(testTool, handleTestConnection)
+
+	// 上传文件工具
+	uploadTool := mcp.NewTool("ssh_upload_file",
+		mcp.WithDescription("上传文件到远程SSH服务器。支持从本地文件路径上传或从base64编码内容上传。"),
+		mcp.WithString("server", mcp.Required(), mcp.Description("服务器名称")),
+		mcp.WithString("remotePath", mcp.Required(), mcp.Description("远程服务器上的目标文件路径")),
+		mcp.WithString("localPath", mcp.Description("本地文件路径（与content二选一）")),
+		mcp.WithString("content", mcp.Description("base64编码的文件内容（与localPath二选一）")),
+	)
+
+	s.AddTool(uploadTool, handleUploadFile)
+
+	// 下载文件工具
+	downloadTool := mcp.NewTool("ssh_download_file",
+		mcp.WithDescription("从远程SSH服务器下载文件。可选择保存到本地路径，并返回base64编码的文件内容。"),
+		mcp.WithString("server", mcp.Required(), mcp.Description("服务器名称")),
+		mcp.WithString("remotePath", mcp.Required(), mcp.Description("远程服务器上的源文件路径")),
+		mcp.WithString("localPath", mcp.Description("本地保存路径（可选，不提供则仅返回内容）")),
+	)
+
+	s.AddTool(downloadTool, handleDownloadFile)
 }
 
 func handleRegisterServer(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -462,4 +484,96 @@ func handleTestConnection(ctx context.Context, request mcp.CallToolRequest) (*mc
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("服务器 %s 连接正常", name)), nil
+}
+
+func handleUploadFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	serverName := request.GetString("server", "")
+	remotePath := request.GetString("remotePath", "")
+	localPath := request.GetString("localPath", "")
+	content := request.GetString("content", "")
+
+	if serverName == "" || remotePath == "" {
+		return mcp.NewToolResultError("缺少必需参数: server, remotePath"), nil
+	}
+
+	if localPath == "" && content == "" {
+		return mcp.NewToolResultError("需要提供localPath或content参数"), nil
+	}
+
+	manager.mu.RLock()
+	client, exists := manager.servers[serverName]
+	manager.mu.RUnlock()
+
+	if !exists {
+		return mcp.NewToolResultError(fmt.Sprintf("服务器 %s 未找到", serverName)), nil
+	}
+
+	if localPath != "" {
+		if err := client.UploadFile(localPath, remotePath); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("上传文件失败: %v", err)), nil
+		}
+	} else {
+		data, err := base64.StdEncoding.DecodeString(content)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("base64解码失败: %v", err)), nil
+		}
+		if err := client.UploadFromBytes(remotePath, data); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("上传文件失败: %v", err)), nil
+		}
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("文件已成功上传到 %s:%s", serverName, remotePath)), nil
+}
+
+func handleDownloadFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	serverName := request.GetString("server", "")
+	remotePath := request.GetString("remotePath", "")
+	localPath := request.GetString("localPath", "")
+
+	if serverName == "" || remotePath == "" {
+		return mcp.NewToolResultError("缺少必需参数: server, remotePath"), nil
+	}
+
+	manager.mu.RLock()
+	client, exists := manager.servers[serverName]
+	manager.mu.RUnlock()
+
+	if !exists {
+		return mcp.NewToolResultError(fmt.Sprintf("服务器 %s 未找到", serverName)), nil
+	}
+
+	data, err := client.DownloadToBytes(remotePath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("下载文件失败: %v", err)), nil
+	}
+
+	// 如果指定了本地路径，保存文件
+	if localPath != "" {
+		if err := client.DownloadFile(remotePath, localPath); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("保存本地文件失败: %v", err)), nil
+		}
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+
+	output := struct {
+		Server     string `json:"server"`
+		RemotePath string `json:"remotePath"`
+		LocalPath  string `json:"localPath,omitempty"`
+		Size       int    `json:"size"`
+		Content    string `json:"content"`
+	}{
+		Server:     serverName,
+		RemotePath: remotePath,
+		LocalPath:  localPath,
+		Size:       len(data),
+		Content:    encoded,
+	}
+
+	outputJSON, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("序列化结果失败: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(string(outputJSON)), nil
 }

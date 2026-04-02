@@ -8,3 +8,4 @@
 # Secrets
 pwd.txt
 /.claude/
+/ssh-config,csv

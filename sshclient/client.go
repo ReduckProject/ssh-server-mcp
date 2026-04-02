@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path"
 	"sync"
 	"time"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -30,12 +33,12 @@ type CommandResult struct {
 
 // SSHClient SSH客户端
 type SSHClient struct {
-	config     SSHConfig
-	client     *ssh.Client
-	mu         sync.Mutex
-	lastUsed   time.Time
-	keepAlive  bool
-	closeChan  chan struct{}
+	config    SSHConfig
+	client    *ssh.Client
+	mu        sync.Mutex
+	lastUsed  time.Time
+	keepAlive bool
+	closeChan chan struct{}
 }
 
 // NewSSHClient 创建SSH客户端
@@ -230,4 +233,94 @@ func (c *SSHClient) GetConfig() SSHConfig {
 		User:    c.config.User,
 		KeyFile: c.config.KeyFile,
 	}
+}
+
+// newSFTPClient 创建SFTP客户端
+func (c *SSHClient) newSFTPClient() (*sftp.Client, error) {
+	if err := c.ensureConnected(); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return sftp.NewClient(c.client)
+}
+
+// UploadFromBytes 将字节数据上传到远程服务器
+func (c *SSHClient) UploadFromBytes(remotePath string, content []byte) error {
+	sftpClient, err := c.newSFTPClient()
+	if err != nil {
+		return fmt.Errorf("创建SFTP客户端失败: %w", err)
+	}
+	defer sftpClient.Close()
+
+	// 确保远程目录存在
+	dir := path.Dir(remotePath)
+	if dir != "." && dir != "/" {
+		sftpClient.MkdirAll(dir)
+	}
+
+	dstFile, err := sftpClient.Create(remotePath)
+	if err != nil {
+		return fmt.Errorf("创建远程文件失败: %w", err)
+	}
+	defer dstFile.Close()
+
+	if _, err := dstFile.Write(content); err != nil {
+		return fmt.Errorf("写入远程文件失败: %w", err)
+	}
+
+	return nil
+}
+
+// UploadFile 上传本地文件到远程服务器
+func (c *SSHClient) UploadFile(localPath, remotePath string) error {
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		return fmt.Errorf("读取本地文件失败: %w", err)
+	}
+	return c.UploadFromBytes(remotePath, data)
+}
+
+// DownloadToBytes 从远程服务器下载文件到字节数组
+func (c *SSHClient) DownloadToBytes(remotePath string) ([]byte, error) {
+	sftpClient, err := c.newSFTPClient()
+	if err != nil {
+		return nil, fmt.Errorf("创建SFTP客户端失败: %w", err)
+	}
+	defer sftpClient.Close()
+
+	srcFile, err := sftpClient.Open(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("打开远程文件失败: %w", err)
+	}
+	defer srcFile.Close()
+
+	data, err := io.ReadAll(srcFile)
+	if err != nil {
+		return nil, fmt.Errorf("读取远程文件失败: %w", err)
+	}
+
+	return data, nil
+}
+
+// DownloadFile 从远程服务器下载文件到本地
+func (c *SSHClient) DownloadFile(remotePath, localPath string) error {
+	data, err := c.DownloadToBytes(remotePath)
+	if err != nil {
+		return err
+	}
+
+	// 确保本地目录存在
+	dir := path.Dir(localPath)
+	if dir != "." && dir != "/" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("创建本地目录失败: %w", err)
+		}
+	}
+
+	if err := os.WriteFile(localPath, data, 0644); err != nil {
+		return fmt.Errorf("写入本地文件失败: %w", err)
+	}
+
+	return nil
 }

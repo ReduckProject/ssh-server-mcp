@@ -1,8 +1,0 @@
-# SSH服务器配置文件
-# 格式: name,host,port,user,password,keyFile
-# password和keyFile二选一，不需要的字段留空
-# 密码含逗号时用双引号包裹
-
-prod-server,43.167.188.85,22,root,"UF{5em!.7x,d",
-# dev-server,192.168.1.100,22,admin,,~/.ssh/id_rsa
-# test-server,test.example.com,2222,testuser,testpass,
