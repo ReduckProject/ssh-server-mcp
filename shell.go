@@ -98,7 +98,7 @@ func (s *InteractiveShell) Run() {
 }
 
 func (s *InteractiveShell) showHelp() {
-	fmt.Println(`
+	fmt.Print(`
 可用命令:
 
   服务器管理:

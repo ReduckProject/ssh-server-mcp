@@ -48,14 +48,17 @@ func NewSSHClient(config SSHConfig) (*SSHClient, error) {
 		config.Port = 22
 	}
 
+	if config.Host == "" || config.User == "" {
+		return nil, fmt.Errorf("需要提供主机地址和用户名")
+	}
+
+	if config.Password == "" && config.KeyFile == "" {
+		return nil, fmt.Errorf("需要提供密码或私钥文件")
+	}
+
 	client := &SSHClient{
 		config:    config,
 		closeChan: make(chan struct{}),
-	}
-
-	// 初始连接
-	if err := client.connect(); err != nil {
-		return nil, err
 	}
 
 	return client, nil
