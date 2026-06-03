@@ -331,7 +331,7 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithDescription("在指定的SSH服务器上执行命令。默认超时30秒，对于长时间运行的命令(如tail -f)建议使用 timeout 参数调整或使用 tail -n 100 代替。"),
 		mcp.WithString("server", mcp.Required(), mcp.Description("服务器名称")),
 		mcp.WithString("command", mcp.Required(), mcp.Description("要执行的命令")),
-		mcp.WithNumber("timeout", mcp.Description("超时时间（秒），默认30秒，最大300秒")),
+		mcp.WithNumber("timeout", mcp.Description("超时时间（秒），默认30秒，最大3600秒")),
 	)
 
 	s.AddTool(execTool, handleExecuteCommand)
@@ -458,8 +458,8 @@ func handleExecuteCommand(ctx context.Context, request mcp.CallToolRequest) (*mc
 	if timeout < 1 {
 		timeout = 30
 	}
-	if timeout > 300 {
-		timeout = 300
+	if timeout > 3600 {
+		timeout = 3600
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
