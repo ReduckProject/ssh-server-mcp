@@ -1,0 +1,91 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1780458403607,
+  "projectRoot": "E:\\Code\\GitHub\\ssh-server-mcp",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Go",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "go.mod"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "go",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "sshclient": {
+      "path": "sshclient",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1780458403576,
+      "keyFiles": [
+        "client.go",
+        "client_test.go"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "main.go",
+      "accessCount": 7,
+      "lastAccessed": 1780481010051,
+      "type": "file"
+    },
+    {
+      "path": "sshclient\\client.go",
+      "accessCount": 4,
+      "lastAccessed": 1780480988833,
+      "type": "file"
+    },
+    {
+      "path": "shell.go",
+      "accessCount": 2,
+      "lastAccessed": 1778055134286,
+      "type": "file"
+    },
+    {
+      "path": "sshclient\\client_test.go",
+      "accessCount": 1,
+      "lastAccessed": 1778055171358,
+      "type": "file"
+    },
+    {
+      "path": "main_test.go",
+      "accessCount": 1,
+      "lastAccessed": 1778055171690,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 1,
+      "lastAccessed": 1780458491344,
+      "type": "directory"
+    }
+  ],
+  "userDirectives": []
+}

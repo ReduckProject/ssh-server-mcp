@@ -620,32 +620,50 @@ func handleDownloadFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.
 		return mcp.NewToolResultError(fmt.Sprintf("服务器 %s 未找到", serverName)), nil
 	}
 
-	data, err := client.DownloadToBytes(remotePath)
+	// 先获取文件大小，用于判断是否返回 base64 内容
+	fileSize, err := client.GetRemoteFileSize(remotePath)
 	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("获取远程文件信息失败: %v", err)), nil
+	}
+
+	// 如果没有指定本地路径，自动使用临时文件
+	if localPath == "" {
+		tmpFile, err := os.CreateTemp("", "ssh-download-*")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("创建临时文件失败: %v", err)), nil
+		}
+		localPath = tmpFile.Name()
+		tmpFile.Close()
+	}
+
+	// 流式下载到本地文件
+	if err := client.DownloadFile(remotePath, localPath); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("下载文件失败: %v", err)), nil
 	}
 
-	// 如果指定了本地路径，保存文件
-	if localPath != "" {
-		if err := client.DownloadFile(remotePath, localPath); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("保存本地文件失败: %v", err)), nil
+	// 大文件（超过 10MB）不返回 base64 内容，避免内存溢出
+	const maxContentSize int64 = 10 * 1024 * 1024 // 10MB
+	var content string
+	if fileSize <= maxContentSize {
+		data, err := os.ReadFile(localPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("读取本地文件失败: %v", err)), nil
 		}
+		content = base64.StdEncoding.EncodeToString(data)
 	}
-
-	encoded := base64.StdEncoding.EncodeToString(data)
 
 	output := struct {
 		Server     string `json:"server"`
 		RemotePath string `json:"remotePath"`
-		LocalPath  string `json:"localPath,omitempty"`
-		Size       int    `json:"size"`
-		Content    string `json:"content"`
+		LocalPath  string `json:"localPath"`
+		Size       int64  `json:"size"`
+		Content    string `json:"content,omitempty"`
 	}{
 		Server:     serverName,
 		RemotePath: remotePath,
 		LocalPath:  localPath,
-		Size:       len(data),
-		Content:    encoded,
+		Size:       fileSize,
+		Content:    content,
 	}
 
 	outputJSON, err := json.MarshalIndent(output, "", "  ")

@@ -307,12 +307,19 @@ func (c *SSHClient) DownloadToBytes(remotePath string) ([]byte, error) {
 	return data, nil
 }
 
-// DownloadFile 从远程服务器下载文件到本地
+// DownloadFile 从远程服务器下载文件到本地（流式写入，不占用大量内存）
 func (c *SSHClient) DownloadFile(remotePath, localPath string) error {
-	data, err := c.DownloadToBytes(remotePath)
+	sftpClient, err := c.newSFTPClient()
 	if err != nil {
-		return err
+		return fmt.Errorf("创建SFTP客户端失败: %w", err)
 	}
+	defer sftpClient.Close()
+
+	srcFile, err := sftpClient.Open(remotePath)
+	if err != nil {
+		return fmt.Errorf("打开远程文件失败: %w", err)
+	}
+	defer srcFile.Close()
 
 	// 确保本地目录存在
 	dir := path.Dir(localPath)
@@ -322,11 +329,34 @@ func (c *SSHClient) DownloadFile(remotePath, localPath string) error {
 		}
 	}
 
-	if err := os.WriteFile(localPath, data, 0644); err != nil {
-		return fmt.Errorf("写入本地文件失败: %w", err)
+	dstFile, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("创建本地文件失败: %w", err)
+	}
+	defer dstFile.Close()
+
+	// 流式拷贝，内存占用恒定
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("下载文件失败: %w", err)
 	}
 
 	return nil
+}
+
+// GetRemoteFileSize 获取远程文件大小
+func (c *SSHClient) GetRemoteFileSize(remotePath string) (int64, error) {
+	sftpClient, err := c.newSFTPClient()
+	if err != nil {
+		return 0, fmt.Errorf("创建SFTP客户端失败: %w", err)
+	}
+	defer sftpClient.Close()
+
+	stat, err := sftpClient.Stat(remotePath)
+	if err != nil {
+		return 0, fmt.Errorf("获取远程文件信息失败: %w", err)
+	}
+
+	return stat.Size(), nil
 }
 
 // UploadDir 递归上传本地目录到远程服务器
